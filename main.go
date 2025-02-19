@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+//go:embed sampledata.json
+var sampleData []byte
 
 var (
 	docStyle      = lipgloss.NewStyle().Margin(1, 2)
@@ -206,14 +210,42 @@ type subscriptionsCommand struct {
 }
 
 func loadSubscriptionsCommand() tea.Msg {
-	subsData, err := exec.Command("az", "account", "list").Output()
+	if _, err := exec.LookPath("az"); err != nil {
+		return subscriptionsCommand{subs: nil, err: fmt.Errorf("az not found in PATH")}
+	}
+
+	subsData, err := fetchSubscriptionData()
 	if err != nil {
 		return subscriptionsCommand{subs: nil, err: err}
 	}
-	var subs []SubInfo
-	err = json.Unmarshal(subsData, &subs)
+	subs, err := convertToSubInfo(subsData)
 	if err != nil {
 		return subscriptionsCommand{subs: nil, err: err}
 	}
 	return subscriptionsCommand{subs: subs, err: nil}
+}
+
+func fetchSubscriptionData() ([]byte, error) {
+	if _, err := exec.LookPath("az"); err != nil {
+		return nil, fmt.Errorf("az not found in PATH")
+	}
+
+	if use_fake_data, ok := os.LookupEnv("USE_SAMPLE_DATA"); ok && use_fake_data == "true" {
+		return sampleData, nil
+	}
+
+	subsData, err := exec.Command("az", "account", "list").Output()
+	if err != nil {
+		return nil, err
+	}
+	return subsData, nil
+}
+
+func convertToSubInfo(subsData []byte) ([]SubInfo, error) {
+	var subs []SubInfo
+	err := json.Unmarshal(subsData, &subs)
+	if err != nil {
+		return nil, err
+	}
+	return subs, nil
 }

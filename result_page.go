@@ -1,8 +1,6 @@
 package main
 
 import (
-	"io"
-	"os"
 	"time"
 
 	"github.com/charmbracelet/bubbles/timer"
@@ -12,22 +10,12 @@ import (
 
 type resultPageModel struct {
 	changed bool
-	dump    io.Writer
 	timer   timer.Model
 }
 
 func NewResultPageModel(changed bool) resultPageModel {
-	var dump *os.File
-	if _, ok := os.LookupEnv("DEBUG"); ok {
-		var err error
-		dump, err = os.OpenFile("messages.log", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-		if err != nil {
-			os.Exit(1)
-		}
-	}
 	return resultPageModel{
 		changed: changed,
-		dump:    dump,
 		timer:   timer.New(1 * time.Second),
 	}
 }

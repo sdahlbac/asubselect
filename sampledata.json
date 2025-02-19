@@ -1,0 +1,52 @@
+[
+  {
+    "cloudName": "AzureCloud",
+    "id": "3f50c9e1-8f3b-4d1e-9a2b-5b8e4b4e5f1a",
+    "isDefault": true,
+    "name": "Subscription 1",
+    "user": {
+      "name": "me@foo.com",
+      "type": "user"
+    }
+  },
+  {
+    "cloudName": "AzureCloud",
+    "id": "7d2e4c3a-6b9d-4f2e-8a3d-1c2e3b4d5f6a",
+    "isDefault": false,
+    "name": "Another Subscription",
+    "user": {
+      "name": "me@bar.com",
+      "type": "user"
+    }
+  },
+  {
+    "cloudName": "AzureCloud",
+    "id": "9a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+    "isDefault": false,
+    "name": "Yet Another Subscription",
+    "user": {
+      "name": "you@yas.com",
+      "type": "user"
+    }
+  },
+  {
+    "cloudName": "AzureCloud",
+    "id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+    "isDefault": false,
+    "name": "Even More Subscription",
+    "user": {
+      "name": "me2@more.com",
+      "type": "user"
+    }
+  },
+  {
+    "cloudName": "AzureCloud",
+    "id": "8e9f0a1b-2c3d-4e5f-6a7b-8c9d0e1f2a3b",
+    "isDefault": true,
+    "name": "the Sub",
+    "user": {
+      "name": "goof@sample.com",
+      "type": "user"
+    }
+  }
+]
