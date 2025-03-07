@@ -153,7 +153,7 @@ func changeSelection(selectedSub SubInfo) (bool, error) {
 	if selectedSub.Id == selectedId {
 		return false, nil
 	}
-	err := exec.Command("az", "account", "set", "--subscription", selectedSub.Id).Err
+	err := exec.Command("az", "account", "set", "--subscription", selectedSub.Id).Run()
 
 	if err != nil {
 		return false, err
