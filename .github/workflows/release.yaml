@@ -28,6 +28,7 @@ jobs:
           go-version: stable
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
+        if: github.event_name != 'pull_request'
         with:
           distribution: goreleaser
           # 'latest', 'nightly', or a semver
