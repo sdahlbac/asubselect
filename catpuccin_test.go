@@ -157,12 +157,10 @@ func TestGlobalVariables(t *testing.T) {
 	// Test that global variables can be set and read
 	originalWidth := width
 	originalHeight := height
-	originalSelectedId := selectedId
 
 	// Set test values
 	width = 100
 	height = 50
-	selectedId = "test-id"
 
 	// Verify they were set
 	if width != 100 {
@@ -171,12 +169,8 @@ func TestGlobalVariables(t *testing.T) {
 	if height != 50 {
 		t.Errorf("Expected height to be 50, got %d", height)
 	}
-	if selectedId != "test-id" {
-		t.Errorf("Expected selectedId to be 'test-id', got '%s'", selectedId)
-	}
 
 	// Restore original values
 	width = originalWidth
 	height = originalHeight
-	selectedId = originalSelectedId
 }
