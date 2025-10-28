@@ -167,6 +167,7 @@ type SubscriptionsLoadedMsg struct {
 type SubscriptionChangedMsg struct {
 	Changed bool
 	Error   error
+	Subscription Subscription
 }
 
 // NewApp creates a new application instance
@@ -332,7 +333,7 @@ func (app *App) handleSubscriptionChanged(msg SubscriptionChangedMsg) (tea.Model
 		app.state = StateError
 		return app, nil
 	}
-
+	app.selectedID = msg.Subscription.ID
 	app.resultPage = NewResultPage(msg.Changed)
 	app.state = StateShowingResult
 
@@ -515,10 +516,7 @@ func (app *App) changeSubscription(subscription Subscription) tea.Cmd {
 			}
 		}
 
-		// Update the selected ID
-		app.selectedID = subscription.ID
-
-		return SubscriptionChangedMsg{Changed: true, Error: nil}
+		return SubscriptionChangedMsg{Changed: true, Error: nil, Subscription: subscription}
 	}
 }
 
