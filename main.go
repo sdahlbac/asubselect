@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -35,6 +36,8 @@ const (
 	KeyQuit  = "q"
 	KeyCtrlC = "ctrl+c"
 	KeyEnter = "enter"
+	KeyRetry = "r"
+	KeyBack  = "esc"
 
 	// Azure CLI configuration
 	AzureCommand = "az"
@@ -42,7 +45,7 @@ const (
 	// UI text
 	AppTitle        = "Select Azure Subscription"
 	LoadingMessage  = " Loading subscriptions..."
-	ErrorPrefix     = "An error occurred: %v\nPress q to quit."
+	RetryingMessage = " Retrying... (attempt %d/%d)"
 
 	// Result messages
 	SuccessMessage = "Azure subscription successfully changed!"
@@ -52,6 +55,38 @@ const (
 // Application errors
 var (
 	ErrAzureCLINotFound = errors.New("azure CLI not found in PATH")
+	ErrNetworkTimeout   = errors.New("network timeout - please check your connection")
+	ErrUnauthorized     = errors.New("azure CLI authentication required - run 'az login'")
+	ErrSubscriptionAccess = errors.New("insufficient permissions for subscription")
+)
+
+// Error types for different scenarios
+type AppError struct {
+	Type        ErrorType
+	Err         error
+	Retryable   bool
+	Suggestion  string
+}
+
+func (e AppError) Error() string {
+	return e.Err.Error()
+}
+
+type ErrorType int
+
+const (
+	ErrorTypeNetwork ErrorType = iota
+	ErrorTypeAuth
+	ErrorTypePermission
+	ErrorTypeConfig
+	ErrorTypeUnknown
+)
+
+// Retry configuration
+const (
+	MaxRetries = 3
+	BaseDelay  = 500 * time.Millisecond
+	MaxDelay   = 5 * time.Second
 )
 
 // Global styles
@@ -67,6 +102,7 @@ type AppState int
 
 const (
 	StateLoading AppState = iota
+	StateRetrying
 	StateSelectingSubscription
 	StateShowingResult
 	StateError
@@ -74,12 +110,16 @@ const (
 
 // App represents the main application state
 type App struct {
-	state      AppState
-	spinner    spinner.Model
-	list       list.Model
-	resultPage *ResultPage
-	selectedID string
-	err        error
+	state         AppState
+	spinner       spinner.Model
+	list          list.Model
+	resultPage    *ResultPage
+	subscriptions []Subscription
+	selectedID    string
+	err           error
+	retryCount    int
+	maxRetries    int
+	lastOperation string
 }
 
 // Subscription represents an Azure subscription
@@ -161,19 +201,28 @@ func (rp *ResultPage) View() string {
 type SubscriptionsLoadedMsg struct {
 	Subscriptions []Subscription
 	Error         error
+	AttemptCount  int
 }
 
 // SubscriptionChangedMsg is sent when a subscription change has been attempted
 type SubscriptionChangedMsg struct {
-	Changed bool
-	Error   error
-	Subscription Subscription
+	Subscription  Subscription
+	Changed       bool
+	Error         error
+	AttemptCount  int
 }
+
+// RetryMsg is sent to retry a failed operation
+type RetryMsg struct{}
+
+// BackMsg is sent to go back to subscription selection
+type BackMsg struct{}
 
 // NewApp creates a new application instance
 func NewApp() *App {
 	app := &App{
-		state: StateLoading,
+		state:      StateLoading,
+		maxRetries: MaxRetries,
 	}
 
 	app.initializeSpinner()
@@ -255,6 +304,10 @@ func (app *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return app.handleSubscriptionsLoaded(msg)
 	case SubscriptionChangedMsg:
 		return app.handleSubscriptionChanged(msg)
+	case RetryMsg:
+		return app.handleRetry(msg)
+	case BackMsg:
+		return app.handleBack(msg)
 	}
 
 	return app.updateSubComponents(msg)
@@ -268,9 +321,23 @@ func (app *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return app, tea.Quit
 	}
 
-	if key == KeyEnter && app.state == StateSelectingSubscription {
-		if selectedSub, ok := app.list.SelectedItem().(Subscription); ok {
-			return app, app.changeSubscription(selectedSub)
+	switch app.state {
+	case StateSelectingSubscription:
+		if key == KeyEnter {
+			if selectedSub, ok := app.list.SelectedItem().(Subscription); ok {
+				return app, app.changeSubscription(selectedSub)
+			}
+		}
+	case StateError:
+		if key == KeyRetry {
+			return app, func() tea.Msg { return RetryMsg{} }
+		}
+		if key == KeyBack {
+			return app, func() tea.Msg { return BackMsg{} }
+		}
+	case StateShowingResult:
+		if key == KeyBack || key == KeyEnter {
+			return app, func() tea.Msg { return BackMsg{} }
 		}
 	}
 
@@ -302,12 +369,20 @@ func (app *App) handleSpinnerMsg(msg spinner.TickMsg) (tea.Model, tea.Cmd) {
 // handleSubscriptionsLoaded processes loaded subscriptions
 func (app *App) handleSubscriptionsLoaded(msg SubscriptionsLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
+		if app.shouldRetry(msg.Error) {
+			app.retryCount++
+			app.lastOperation = "load"
+			app.state = StateRetrying
+			return app, app.retryOperation()
+		}
 		app.err = msg.Error
 		app.state = StateError
 		return app, nil
 	}
 
 	app.state = StateSelectingSubscription
+	app.subscriptions = msg.Subscriptions  // Save subscriptions for retry logic
+	app.retryCount = 0  // Reset retry count on success
 
 	// Convert subscriptions to list items
 	items := make([]list.Item, len(msg.Subscriptions))
@@ -329,15 +404,52 @@ func (app *App) handleSubscriptionsLoaded(msg SubscriptionsLoadedMsg) (tea.Model
 // handleSubscriptionChanged processes subscription change results
 func (app *App) handleSubscriptionChanged(msg SubscriptionChangedMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
+		if app.shouldRetry(msg.Error) {
+			app.retryCount++
+			app.lastOperation = "change"
+			app.state = StateRetrying
+			return app, app.retryOperation()
+		}
 		app.err = msg.Error
 		app.state = StateError
 		return app, nil
 	}
+
 	app.selectedID = msg.Subscription.ID
 	app.resultPage = NewResultPage(msg.Changed)
 	app.state = StateShowingResult
+	app.retryCount = 0  // Reset retry count on success
 
 	return app, app.resultPage.Init()
+}
+
+// handleRetry processes retry requests
+func (app *App) handleRetry(msg RetryMsg) (tea.Model, tea.Cmd) {
+	switch app.lastOperation {
+	case "load":
+		app.state = StateLoading
+		return app, app.loadSubscriptions
+	case "change":
+		if len(app.subscriptions) > 0 && app.list.Index() < len(app.subscriptions) {
+			selectedSub := app.subscriptions[app.list.Index()]
+			return app, app.changeSubscription(selectedSub)
+		}
+	}
+
+	// If we can't retry, go back to subscription selection
+	app.state = StateSelectingSubscription
+	app.err = nil
+	app.retryCount = 0
+	return app, nil
+}
+
+// handleBack processes back navigation
+func (app *App) handleBack(msg BackMsg) (tea.Model, tea.Cmd) {
+	app.state = StateSelectingSubscription
+	app.err = nil
+	app.retryCount = 0
+	app.resultPage = nil
+	return app, nil
 }
 
 // updateSubComponents updates child components
@@ -377,6 +489,8 @@ func (app *App) View() string {
 	switch app.state {
 	case StateLoading:
 		return app.loadingView()
+	case StateRetrying:
+		return app.retryingView()
 	case StateSelectingSubscription:
 		return app.subscriptionListView()
 	case StateShowingResult:
@@ -412,9 +526,34 @@ func (app *App) resultView() string {
 	return ""
 }
 
+// retryingView renders the retry screen
+func (app *App) retryingView() string {
+	content := fmt.Sprintf(RetryingMessage, app.retryCount, app.maxRetries)
+	spinner := lipgloss.JoinHorizontal(lipgloss.Top, app.spinner.View(), content)
+	return app.centeredView(spinner, Text)
+}
+
 // errorView renders the error screen
 func (app *App) errorView() string {
-	content := fmt.Sprintf(ErrorPrefix, app.err)
+	appErr := app.classifyError(app.err)
+
+	var content string
+	if appErr.Retryable && app.retryCount < app.maxRetries {
+		content = fmt.Sprintf(
+			"❌ %s\n\n💡 %s\n\n🔄 Press 'r' to retry (%d/%d) • ← Press 'esc' to go back • Press 'q' to quit",
+			appErr.Err.Error(),
+			appErr.Suggestion,
+			app.retryCount,
+			app.maxRetries,
+		)
+	} else {
+		content = fmt.Sprintf(
+			"❌ %s\n\n💡 %s\n\n← Press 'esc' to go back • Press 'q' to quit",
+			appErr.Err.Error(),
+			appErr.Suggestion,
+		)
+	}
+
 	return app.centeredView(content, Error)
 }
 
@@ -427,6 +566,73 @@ func (app *App) centeredView(content string, color lipgloss.Color) string {
 		AlignVertical(lipgloss.Center).
 		AlignHorizontal(lipgloss.Center).
 		Render(content)
+}
+
+// Error handling functions
+
+// classifyError creates an AppError with appropriate type and suggestions
+func (app *App) classifyError(err error) *AppError {
+	errStr := err.Error()
+
+	switch {
+	case strings.Contains(errStr, "network") || strings.Contains(errStr, "connection") || strings.Contains(errStr, "timeout"):
+		return &AppError{
+			Err:        err,
+			Type:       ErrorTypeNetwork,
+			Retryable:  true,
+			Suggestion: "Check your network connection and try again.",
+		}
+	case strings.Contains(errStr, "authentication") || strings.Contains(errStr, "login"):
+		return &AppError{
+			Err:        err,
+			Type:       ErrorTypeAuth,
+			Retryable:  false,
+			Suggestion: "Please run 'az login' to authenticate with Azure.",
+		}
+	case strings.Contains(errStr, "permission") || strings.Contains(errStr, "unauthorized"):
+		return &AppError{
+			Err:        err,
+			Type:       ErrorTypePermission,
+			Retryable:  false,
+			Suggestion: "Check that your account has the required permissions.",
+		}
+	case strings.Contains(errStr, "not found") || strings.Contains(errStr, "az"):
+		return &AppError{
+			Err:        err,
+			Type:       ErrorTypeConfig,
+			Retryable:  false,
+			Suggestion: "Ensure Azure CLI is installed and in your PATH.",
+		}
+	default:
+		return &AppError{
+			Err:        err,
+			Type:       ErrorTypeUnknown,
+			Retryable:  true,
+			Suggestion: "An unexpected error occurred. Please try again.",
+		}
+	}
+}
+
+// shouldRetry checks if an operation should be retried
+func (app *App) shouldRetry(err error) bool {
+	if app.retryCount >= app.maxRetries {
+		return false
+	}
+
+	appErr := app.classifyError(err)
+	return appErr.Retryable
+}
+
+// retryOperation performs the retry with exponential backoff
+func (app *App) retryOperation() tea.Cmd {
+	delay := BaseDelay * time.Duration(1<<app.retryCount) // Exponential backoff
+	if delay > MaxDelay {
+		delay = MaxDelay
+	}
+
+	return tea.Tick(delay, func(t time.Time) tea.Msg {
+		return RetryMsg{}
+	})
 }
 
 // Azure service functions
