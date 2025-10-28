@@ -206,9 +206,9 @@ type SubscriptionsLoadedMsg struct {
 
 // SubscriptionChangedMsg is sent when a subscription change has been attempted
 type SubscriptionChangedMsg struct {
-	Subscription  Subscription
 	Changed       bool
 	Error         error
+	Subscription  Subscription
 	AttemptCount  int
 }
 
