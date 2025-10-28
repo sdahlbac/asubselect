@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -65,7 +68,7 @@ func TestParseSubscriptions(t *testing.T) {
 			}
 		},
 		{
-			"id": "test-id-2", 
+			"id": "test-id-2",
 			"name": "Test Sub 2",
 			"isDefault": false,
 			"user": {
@@ -258,7 +261,7 @@ func BenchmarkParseSubscriptions(b *testing.B) {
 	testData := `[
 		{
 			"id": "test-id-1",
-			"name": "Test Sub 1", 
+			"name": "Test Sub 1",
 			"isDefault": true,
 			"user": {"name": "user1@example.com"}
 		}
@@ -270,5 +273,145 @@ func BenchmarkParseSubscriptions(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Unexpected error: %v", err)
 		}
+	}
+}
+
+// Error handling tests
+func TestAppError_Classification(t *testing.T) {
+	app := NewApp()
+
+	tests := []struct {
+		name        string
+		err         error
+		expectedType ErrorType
+		retryable   bool
+	}{
+		{
+			name:         "Network error",
+			err:          errors.New("network connection failed"),
+			expectedType: ErrorTypeNetwork,
+			retryable:    true,
+		},
+		{
+			name:         "Authentication error",
+			err:          errors.New("authentication failed"),
+			expectedType: ErrorTypeAuth,
+			retryable:    false,
+		},
+		{
+			name:         "Permission error",
+			err:          errors.New("permission denied"),
+			expectedType: ErrorTypePermission,
+			retryable:    false,
+		},
+		{
+			name:         "CLI not found",
+			err:          errors.New("az command not found"),
+			expectedType: ErrorTypeConfig,
+			retryable:    false,
+		},
+		{
+			name:         "Unknown error",
+			err:          errors.New("something went wrong"),
+			expectedType: ErrorTypeUnknown,
+			retryable:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			appErr := app.classifyError(tt.err)
+
+			if appErr.Type != tt.expectedType {
+				t.Errorf("Expected error type %v, got %v", tt.expectedType, appErr.Type)
+			}
+
+			if appErr.Retryable != tt.retryable {
+				t.Errorf("Expected retryable %v, got %v", tt.retryable, appErr.Retryable)
+			}
+
+			if appErr.Err != tt.err {
+				t.Errorf("Expected error %v, got %v", tt.err, appErr.Err)
+			}
+
+			if appErr.Suggestion == "" {
+				t.Error("Expected non-empty suggestion")
+			}
+		})
+	}
+}
+
+func TestApp_ShouldRetry(t *testing.T) {
+	app := NewApp()
+
+	// Test retryable error within limit
+	networkErr := errors.New("network timeout")
+	if !app.shouldRetry(networkErr) {
+		t.Error("Should retry network error when under retry limit")
+	}
+
+	// Test retryable error at limit
+	app.retryCount = MaxRetries
+	if app.shouldRetry(networkErr) {
+		t.Error("Should not retry when at retry limit")
+	}
+
+	// Test non-retryable error
+	app.retryCount = 0
+	authErr := errors.New("authentication failed")
+	if app.shouldRetry(authErr) {
+		t.Error("Should not retry authentication error")
+	}
+}
+
+func TestApp_ErrorHandling_Integration(t *testing.T) {
+	app := NewApp()
+
+	// Test handling subscription load error with retry
+	msg := SubscriptionsLoadedMsg{
+		Subscriptions: nil,
+		Error:         errors.New("network timeout"),
+	}
+
+	model, cmd := app.handleSubscriptionsLoaded(msg)
+	app = model.(*App)
+
+	// Should be in retrying state
+	if app.state != StateRetrying {
+		t.Errorf("Expected state %v, got %v", StateRetrying, app.state)
+	}
+
+	// Should have incremented retry count
+	if app.retryCount != 1 {
+		t.Errorf("Expected retry count 1, got %d", app.retryCount)
+	}
+
+	// Should have set last operation
+	if app.lastOperation != "load" {
+		t.Errorf("Expected last operation 'load', got %s", app.lastOperation)
+	}
+
+	// Should return retry command
+	if cmd == nil {
+		t.Error("Expected retry command to be returned")
+	}
+}
+
+func TestApp_RetryView(t *testing.T) {
+	app := NewApp()
+	app.state = StateRetrying
+	app.retryCount = 2
+	app.maxRetries = MaxRetries
+
+	view := app.retryingView()
+
+	if view == "" {
+		t.Error("Retry view should not be empty")
+	}
+
+	// Should contain retry information
+	expectedText := fmt.Sprintf("Retrying... (attempt %d/%d)", app.retryCount, app.maxRetries)
+	if !strings.Contains(view, expectedText) {
+		t.Errorf("Retry view should contain retry count information, got: %s", view)
 	}
 }
