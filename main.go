@@ -48,24 +48,24 @@ const (
 	RetryingMessage = " Retrying... (attempt %d/%d)"
 
 	// Result messages
-	SuccessMessage = "Azure subscription successfully changed!"
+	SuccessMessage  = "Azure subscription successfully changed!"
 	NoChangeMessage = "No change needed - subscription is already active"
 )
 
 // Application errors
 var (
-	ErrAzureCLINotFound = errors.New("azure CLI not found in PATH")
-	ErrNetworkTimeout   = errors.New("network timeout - please check your connection")
-	ErrUnauthorized     = errors.New("azure CLI authentication required - run 'az login'")
+	ErrAzureCLINotFound   = errors.New("azure CLI not found in PATH")
+	ErrNetworkTimeout     = errors.New("network timeout - please check your connection")
+	ErrUnauthorized       = errors.New("azure CLI authentication required - run 'az login'")
 	ErrSubscriptionAccess = errors.New("insufficient permissions for subscription")
 )
 
 // Error types for different scenarios
 type AppError struct {
-	Type        ErrorType
-	Err         error
-	Retryable   bool
-	Suggestion  string
+	Type       ErrorType
+	Err        error
+	Retryable  bool
+	Suggestion string
 }
 
 func (e AppError) Error() string {
@@ -206,10 +206,10 @@ type SubscriptionsLoadedMsg struct {
 
 // SubscriptionChangedMsg is sent when a subscription change has been attempted
 type SubscriptionChangedMsg struct {
-	Changed       bool
-	Error         error
-	Subscription  Subscription
-	AttemptCount  int
+	Changed      bool
+	Error        error
+	Subscription Subscription
+	AttemptCount int
 }
 
 // RetryMsg is sent to retry a failed operation
@@ -328,6 +328,7 @@ func (app *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return app, app.changeSubscription(selectedSub)
 			}
 		}
+		return app.updateSubComponents(msg)
 	case StateError:
 		if key == KeyRetry {
 			return app, func() tea.Msg { return RetryMsg{} }
@@ -381,8 +382,8 @@ func (app *App) handleSubscriptionsLoaded(msg SubscriptionsLoadedMsg) (tea.Model
 	}
 
 	app.state = StateSelectingSubscription
-	app.subscriptions = msg.Subscriptions  // Save subscriptions for retry logic
-	app.retryCount = 0  // Reset retry count on success
+	app.subscriptions = msg.Subscriptions // Save subscriptions for retry logic
+	app.retryCount = 0                    // Reset retry count on success
 
 	// Convert subscriptions to list items
 	items := make([]list.Item, len(msg.Subscriptions))
@@ -418,7 +419,7 @@ func (app *App) handleSubscriptionChanged(msg SubscriptionChangedMsg) (tea.Model
 	app.selectedID = msg.Subscription.ID
 	app.resultPage = NewResultPage(msg.Changed)
 	app.state = StateShowingResult
-	app.retryCount = 0  // Reset retry count on success
+	app.retryCount = 0 // Reset retry count on success
 
 	return app, app.resultPage.Init()
 }
@@ -680,7 +681,7 @@ func fetchSubscriptionData() ([]byte, error) {
 		return sampleData, nil
 	}
 
-	cmd := exec.Command(AzureCommand, "account", "list")
+	cmd := exec.Command(AzureCommand, "account", "list", "--all")
 	data, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("azure CLI command failed: %w", err)
