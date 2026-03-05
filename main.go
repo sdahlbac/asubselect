@@ -124,17 +124,18 @@ type App struct {
 
 // Subscription represents an Azure subscription
 type Subscription struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	IsDefault bool   `json:"isDefault"`
-	User      struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	TenantDisplayName string `json:"tenantDisplayName"`
+	IsDefault         bool   `json:"isDefault"`
+	User              struct {
 		Name string `json:"name"`
 	} `json:"user"`
 }
 
 // Title implements list.Item interface
 func (s Subscription) Title() string {
-	return s.Name
+	return fmt.Sprintf("%s / %s", s.TenantDisplayName, s.Name)
 }
 
 // Description implements list.Item interface
@@ -144,7 +145,7 @@ func (s Subscription) Description() string {
 
 // FilterValue implements list.Item interface
 func (s Subscription) FilterValue() string {
-	return s.Name + "/" + s.User.Name
+	return s.Name + "/" + s.TenantDisplayName + "/" + s.User.Name
 }
 
 // ResultPage represents the result display after subscription change
