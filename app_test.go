@@ -11,9 +11,10 @@ import (
 
 func TestSubscription_Methods(t *testing.T) {
 	sub := Subscription{
-		ID:        "test-id",
-		Name:      "Test Subscription",
-		IsDefault: true,
+		ID:                "test-id",
+		Name:              "Test Subscription",
+		TenantDisplayName: "Tenant Name",
+		IsDefault:         true,
 		User: struct {
 			Name string `json:"name"`
 		}{
@@ -22,8 +23,8 @@ func TestSubscription_Methods(t *testing.T) {
 	}
 
 	// Test Title method
-	if sub.Title() != "Test Subscription" {
-		t.Errorf("Expected title 'Test Subscription', got '%s'", sub.Title())
+	if sub.Title() != "Tenant Name / Test Subscription" {
+		t.Errorf("Expected title 'Tenant Name / Test Subscription', got '%s'", sub.Title())
 	}
 
 	// Test Description method
@@ -33,9 +34,47 @@ func TestSubscription_Methods(t *testing.T) {
 	}
 
 	// Test FilterValue method
-	expectedFilter := "Test Subscription/test@example.com"
+	expectedFilter := "Test Subscription/Tenant Name/test@example.com"
 	if sub.FilterValue() != expectedFilter {
 		t.Errorf("Expected filter value '%s', got '%s'", expectedFilter, sub.FilterValue())
+	}
+}
+
+func TestSubscription_Methods_IgnoreEmptyFields(t *testing.T) {
+	sub := Subscription{
+		ID:   "test-id",
+		Name: "Test Subscription",
+		User: struct {
+			Name string `json:"name"`
+		}{},
+	}
+
+	if sub.Title() != "Test Subscription" {
+		t.Errorf("Expected title 'Test Subscription', got '%s'", sub.Title())
+	}
+
+	if sub.Description() != "test-id" {
+		t.Errorf("Expected description 'test-id', got '%s'", sub.Description())
+	}
+
+	if sub.FilterValue() != "Test Subscription" {
+		t.Errorf("Expected filter value 'Test Subscription', got '%s'", sub.FilterValue())
+	}
+}
+
+func TestAzureAccountListArgs(t *testing.T) {
+	expected := []string{
+		"account",
+		"list",
+		"--all",
+		"--output",
+		"json",
+		"--query",
+		AzureListQuery,
+	}
+
+	if actual := azureAccountListArgs(); strings.Join(actual, "\x00") != strings.Join(expected, "\x00") {
+		t.Errorf("Expected args %v, got %v", expected, actual)
 	}
 }
 
@@ -281,10 +320,10 @@ func TestAppError_Classification(t *testing.T) {
 	app := NewApp()
 
 	tests := []struct {
-		name        string
-		err         error
+		name         string
+		err          error
 		expectedType ErrorType
-		retryable   bool
+		retryable    bool
 	}{
 		{
 			name:         "Network error",

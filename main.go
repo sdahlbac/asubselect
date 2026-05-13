@@ -40,7 +40,8 @@ const (
 	KeyBack  = "esc"
 
 	// Azure CLI configuration
-	AzureCommand = "az"
+	AzureCommand   = "az"
+	AzureListQuery = "[].{id:id,name:name,tenantDisplayName:tenantDisplayName,isDefault:isDefault,user:{name:user.name}}"
 
 	// UI text
 	AppTitle        = "Select Azure Subscription"
@@ -135,17 +136,33 @@ type Subscription struct {
 
 // Title implements list.Item interface
 func (s Subscription) Title() string {
-	return fmt.Sprintf("%s / %s", s.TenantDisplayName, s.Name)
+	return joinNonEmpty(" / ", s.TenantDisplayName, s.Name)
 }
 
 // Description implements list.Item interface
 func (s Subscription) Description() string {
+	if s.User.Name == "" {
+		return s.ID
+	}
+
 	return fmt.Sprintf("%s (%s)", s.ID, s.User.Name)
 }
 
 // FilterValue implements list.Item interface
 func (s Subscription) FilterValue() string {
-	return s.Name + "/" + s.TenantDisplayName + "/" + s.User.Name
+	return joinNonEmpty("/", s.Name, s.TenantDisplayName, s.User.Name)
+}
+
+func joinNonEmpty(separator string, parts ...string) string {
+	nonEmptyParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		nonEmptyParts = append(nonEmptyParts, part)
+	}
+
+	return strings.Join(nonEmptyParts, separator)
 }
 
 // ResultPage represents the result display after subscription change
@@ -682,13 +699,25 @@ func fetchSubscriptionData() ([]byte, error) {
 		return sampleData, nil
 	}
 
-	cmd := exec.Command(AzureCommand, "account", "list", "--all")
+	cmd := exec.Command(AzureCommand, azureAccountListArgs()...)
 	data, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("azure CLI command failed: %w", err)
 	}
 
 	return data, nil
+}
+
+func azureAccountListArgs() []string {
+	return []string{
+		"account",
+		"list",
+		"--all",
+		"--output",
+		"json",
+		"--query",
+		AzureListQuery,
+	}
 }
 
 // parseSubscriptions parses JSON data into Subscription structs
